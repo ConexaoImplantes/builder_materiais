@@ -75,6 +75,7 @@ interface BrandConfig {
   description: string;
   pdfBase64?: string;
   pdfName?: string;
+  systemPrompt?: string;
 }
 
 interface ApiKeys {
@@ -221,7 +222,13 @@ export default function App() {
   const [brandConfig, setBrandConfig] = useState<BrandConfig>({
     primaryBlue: '#004a8e',
     primaryGold: '#c5a059',
-    description: 'A Conexão Sistemas de Prótese é líder em inovação para implantodontia...'
+    description: 'A Conexão Sistemas de Prótese é líder em inovação para implantodontia...',
+    systemPrompt: `Gere um ÚNICO arquivo HTML autônomo contendo HTML, CSS (use Tailwind via CDN: https://cdn.tailwindcss.com) e JS (use Lucide Icons via CDN: https://unpkg.com/lucide@latest).
+NÃO inclua cabeçalhos ou rodapés externos do construtor.
+Aplique o branding fornecido de forma elegante e profissional.
+Use animações suaves (pode usar CSS puro ou bibliotecas via CDN se necessário).
+O arquivo deve ser auto-contido e pronto para ser aberto em qualquer navegador.
+Retorne APENAS o código HTML completo, sem blocos de código markdown (\`\`\`html).`
   });
   
   const [apiKeys, setApiKeys] = useState<ApiKeys>({
@@ -302,7 +309,8 @@ O Flex Gold é a tendência atual para clínicas que buscam um implante para tud
           primaryBlue: branding.primary_blue,
           primaryGold: branding.primary_gold,
           description: branding.description,
-          pdfName: branding.pdf_name
+          pdfName: branding.pdf_name,
+          systemPrompt: branding.system_prompt || brandConfig.systemPrompt
         });
       }
 
@@ -370,7 +378,8 @@ O Flex Gold é a tendência atual para clínicas que buscam um implante para tud
           primary_blue: brandConfig.primaryBlue,
           primary_gold: brandConfig.primaryGold,
           description: brandConfig.description,
-          pdf_name: brandConfig.pdfName
+          pdf_name: brandConfig.pdfName,
+          system_prompt: brandConfig.systemPrompt
         });
       
       if (error) throw error;
@@ -560,13 +569,8 @@ O Flex Gold é a tendência atual para clínicas que buscam um implante para tud
         IDIOMA DA PÁGINA: ${langNames[lang]}
         TRADUÇÃO: Traduza todo o conteúdo do Markdown fielmente para o idioma ${langNames[lang]}, mantendo a precisão técnica.
 
-        INSTRUÇÃO CRÍTICA:
-        Gere um ÚNICO arquivo HTML autônomo contendo HTML, CSS (use Tailwind via CDN: https://cdn.tailwindcss.com) e JS (use Lucide Icons via CDN: https://unpkg.com/lucide@latest).
-        NÃO inclua cabeçalhos ou rodapés externos do construtor.
-        Aplique o branding fornecido de forma elegante e profissional.
-        Use animações suaves (pode usar CSS puro ou bibliotecas via CDN se necessário).
-        O arquivo deve ser auto-contido e pronto para ser aberto em qualquer navegador.
-        Retorne APENAS o código HTML completo, sem blocos de código markdown (\`\`\`html).
+        INSTRUÇÃO DE GERAÇÃO:
+        ${brandConfig.systemPrompt}
       ` }
     ];
 
@@ -967,6 +971,19 @@ O Flex Gold é a tendência atual para clínicas que buscam um implante para tud
                       <span className="absolute right-4 top-2 text-slate-300 text-sm">.html</span>
                     </div>
                   </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                    <Sparkles size={12} /> Prompt de Instrução do Sistema
+                  </label>
+                  <textarea 
+                    value={brandConfig.systemPrompt}
+                    onChange={(e) => setBrandConfig({ ...brandConfig, systemPrompt: e.target.value })}
+                    placeholder="Instruções para a IA gerar o HTML..."
+                    className="w-full h-32 px-4 py-3 border rounded-2xl text-sm outline-none focus:ring-2 focus:ring-slate-200 font-mono leading-relaxed"
+                  />
+                  <p className="text-[10px] text-slate-400">Este prompt define como a IA deve construir a estrutura, o design e as funcionalidades do arquivo HTML final.</p>
                 </div>
 
                 <textarea 

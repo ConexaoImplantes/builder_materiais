@@ -25,8 +25,12 @@ Você deve configurar as seguintes variáveis de ambiente na aba **Environment V
 
 > **Nota:** As variáveis do Supabase devem começar com `VITE_` para que o Vite as exponha ao front-end.
 
-## 4. Configuração do Supabase (RLS)
-Para que a persistência de dados funcione corretamente em produção, certifique-se de que as tabelas no Supabase possuem as políticas de **Row Level Security (RLS)** configuradas para permitir que o usuário autenticado (`hevertoneduardoperes@gmail.com`) possa ler e escrever em seus próprios registros.
+## 4. Configuração do Supabase (Tabelas e RLS)
+Para que a persistência de dados funcione corretamente, verifique se suas tabelas possuem as colunas necessárias:
+- **branding_configs**: deve conter `primary_blue`, `primary_gold`, `description`, `pdf_name` e `system_prompt` (tipo text).
+- **generated_materials**: deve conter `name`, `html_content` e `user_id`.
+
+Certifique-se de que as políticas de **Row Level Security (RLS)** estão configuradas para permitir que o usuário autenticado (`hevertoneduardoperes@gmail.com`) possa ler e escrever em seus próprios registros.
 
 ## 5. Deploy
 Clique em **"Deploy"**. A Vercel irá compilar o projeto e fornecer uma URL de produção.
