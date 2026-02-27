@@ -24,6 +24,8 @@ Bem-vindo ao Hub Conexão Digital. Esta plataforma foi desenvolvida para automat
 - Refine o texto Markdown se necessário.
 - Escolha o **Modelo de IA** desejado.
 - Selecione o **Idioma** (PT-BR, EN-US, ES-ES ou os três simultaneamente).
+- **Biblioteca de Prompts:** Use o dropdown para selecionar instruções pré-salvas. Isso carregará automaticamente as configurações de design e comportamento no campo de prompt.
+- **Salvar na Biblioteca:** Se você criar um prompt novo e útil, clique em "Salvar na Biblioteca" para usá-lo em gerações futuras.
 - Defina o nome do arquivo e clique em **"Gerar Página Interativa"**.
 
 ### 5. Preview e Download
