@@ -31,10 +31,17 @@ import {
   Save,
   Trash2,
   ExternalLink,
-  History
+  History,
+  LogIn,
+  LogOut,
+  User,
+  Pencil,
+  AlertTriangle
 } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
 import ReactMarkdown from 'react-markdown';
+import { supabase } from './lib/supabase';
+import { Session } from '@supabase/supabase-js';
 
 // --- Types & Constants ---
 
@@ -206,12 +213,15 @@ export default function App() {
   const [view, setView] = useState<ViewType>('branding');
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('');
-  
+  const [session, setSession] = useState<Session | null>(null);
+  const [authEmail, setAuthEmail] = useState('hevertoneduardoperes@gmail.com');
+  const [authPassword, setAuthPassword] = useState('@#1984198720042009@#');
+
   // Data State
   const [brandConfig, setBrandConfig] = useState<BrandConfig>({
     primaryBlue: '#004a8e',
     primaryGold: '#c5a059',
-    description: 'Marca focada em tecnologia e excelência em implantodontia.'
+    description: 'A Conexão Sistemas de Prótese é líder em inovação para implantodontia...'
   });
   
   const [apiKeys, setApiKeys] = useState<ApiKeys>({
@@ -244,9 +254,158 @@ O Flex Gold é a tendência atual para clínicas que buscam um implante para tud
   
   const [pageData, setPageData] = useState<PageData | null>(null);
   const [selectedApi, setSelectedApi] = useState<keyof ApiKeys>('gemini');
+  const [selectedLang, setSelectedLang] = useState<'pt' | 'en' | 'es' | 'all'>('pt');
   const [filename, setFilename] = useState<string>('minha-pagina');
   const [generatedHtml, setGeneratedHtml] = useState<string>('');
   const [materials, setMaterials] = useState<GeneratedMaterial[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState<string>('');
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
+  // --- Supabase Integration ---
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (session) {
+      loadUserData();
+    } else {
+      setMaterials([]);
+      setApiKeys({ gemini: '', openai: '', claude: '', groq: '' });
+    }
+  }, [session]);
+
+  const loadUserData = async () => {
+    if (!session) return;
+    setLoading(true);
+    setLoadingMsg('Carregando seus dados do Supabase...');
+
+    try {
+      // Load Branding
+      const { data: branding, error: bError } = await supabase
+        .from('branding_configs')
+        .select('*')
+        .single();
+      
+      if (branding && !bError) {
+        setBrandConfig({
+          primaryBlue: branding.primary_blue,
+          primaryGold: branding.primary_gold,
+          description: branding.description,
+          pdfName: branding.pdf_name
+        });
+      }
+
+      // Load API Keys
+      const { data: keys, error: kError } = await supabase
+        .from('api_keys')
+        .select('*');
+      
+      if (keys && !kError) {
+        const newKeys = { ...apiKeys };
+        keys.forEach(k => {
+          if (k.service_name in newKeys) {
+            (newKeys as any)[k.service_name] = k.key_value;
+          }
+        });
+        setApiKeys(newKeys);
+      }
+
+      // Load Materials
+      const { data: mats, error: mError } = await supabase
+        .from('generated_materials')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (mats && !mError) {
+        setMaterials(mats.map(m => ({
+          id: m.id,
+          name: m.name,
+          html: m.html_content,
+          timestamp: new Date(m.created_at).getTime()
+        })));
+      }
+    } catch (err) {
+      console.error('Erro ao carregar dados:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setLoadingMsg('Entrando...');
+
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+      if (error) throw error;
+    } catch (error: any) {
+      alert(`Erro na autenticação: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveBranding = async () => {
+    if (!session) return alert('Você precisa estar logado para salvar.');
+    setLoading(true);
+    setLoadingMsg('Salvando branding no Supabase...');
+
+    try {
+      const { error } = await supabase
+        .from('branding_configs')
+        .upsert({
+          user_id: session.user.id,
+          primary_blue: brandConfig.primaryBlue,
+          primary_gold: brandConfig.primaryGold,
+          description: brandConfig.description,
+          pdf_name: brandConfig.pdfName
+        });
+      
+      if (error) throw error;
+      alert('Branding salvo com sucesso!');
+    } catch (error: any) {
+      alert(`Erro ao salvar branding: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveApiKeys = async () => {
+    if (!session) return alert('Você precisa estar logado para salvar.');
+    setLoading(true);
+    setLoadingMsg('Salvando chaves de API no Supabase...');
+
+    try {
+      const keysToSave = Object.entries(apiKeys).map(([service, value]) => ({
+        user_id: session.user.id,
+        service_name: service,
+        key_value: value
+      }));
+
+      const { error } = await supabase
+        .from('api_keys')
+        .upsert(keysToSave, { onConflict: 'user_id,service_name' });
+      
+      if (error) throw error;
+      alert('Chaves de API salvas com sucesso!');
+    } catch (error: any) {
+      alert(`Erro ao salvar chaves: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // --- Logic ---
 
@@ -262,14 +421,80 @@ O Flex Gold é a tendência atual para clínicas que buscam um implante para tud
     URL.revokeObjectURL(url);
   };
 
-  const deleteMaterial = (id: string) => {
-    setMaterials(materials.filter(m => m.id !== id));
+  const deleteMaterial = async (id: string) => {
+    setDeleteConfirmId(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return;
+    
+    setLoading(true);
+    setLoadingMsg('Excluindo material...');
+
+    try {
+      if (session) {
+        const { error } = await supabase
+          .from('generated_materials')
+          .delete()
+          .eq('id', deleteConfirmId)
+          .eq('user_id', session.user.id);
+        if (error) throw error;
+      }
+      setMaterials(prev => prev.filter(m => m.id !== deleteConfirmId));
+      setDeleteConfirmId(null);
+    } catch (error: any) {
+      alert(`Erro ao excluir: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const previewMaterial = (material: GeneratedMaterial) => {
     setGeneratedHtml(material.html);
     setFilename(material.name);
     setView('preview');
+  };
+
+  const updateMaterialName = async (id: string) => {
+    const nameToSave = editName.trim();
+    if (!nameToSave) {
+      setEditingId(null);
+      return;
+    }
+    
+    // Guardar estado anterior para rollback em caso de erro
+    const previousMaterials = [...materials];
+    
+    // 1. Atualização Otimista (Front-end reflete na hora)
+    setMaterials(prev => prev.map(m => m.id === id ? { ...m, name: nameToSave } : m));
+    setEditingId(null);
+    setEditName('');
+
+    // 2. Persistência no Back-end (Supabase)
+    if (session) {
+      try {
+        // Incluímos o user_id para garantir que o RLS do Supabase valide a permissão de escrita
+        const { data, error } = await supabase
+          .from('generated_materials')
+          .update({ name: nameToSave })
+          .eq('id', id)
+          .eq('user_id', session.user.id)
+          .select();
+        
+        if (error) throw error;
+
+        // Se data estiver vazio, significa que nenhuma linha foi atualizada (ID não encontrado ou RLS bloqueou)
+        if (!data || data.length === 0) {
+          throw new Error("O registro não foi encontrado ou você não tem permissão para editá-lo.");
+        }
+
+        console.log("Sucesso ao atualizar no Supabase:", data);
+      } catch (error: any) {
+        alert('Erro ao salvar no banco de dados: ' + error.message);
+        // Reverter se falhar para o usuário não achar que salvou
+        setMaterials(previousMaterials);
+      }
+    }
   };
 
   const convertToMarkdown = async () => {
@@ -315,66 +540,110 @@ O Flex Gold é a tendência atual para clínicas que buscam um implante para tud
     }
   };
 
-  const generatePage = async () => {
-    if (!markdownText.trim()) return;
-    setLoading(true);
-    setLoadingMsg(`Gerando página interativa via ${selectedApi.toUpperCase()}...`);
+  const generateSinglePage = async (lang: 'pt' | 'en' | 'es', customFilename: string) => {
+    const apiKey = apiKeys[selectedApi] || (selectedApi === 'gemini' ? process.env.GEMINI_API_KEY : '');
+    if (!apiKey) throw new Error(`API Key para ${selectedApi.toUpperCase()} não encontrada na aba API Keys.`);
+
+    const ai = new GoogleGenAI({ apiKey: selectedApi === 'gemini' ? apiKey : (apiKeys.gemini || process.env.GEMINI_API_KEY || '') });
     
-    try {
-      const apiKey = apiKeys[selectedApi] || (selectedApi === 'gemini' ? process.env.GEMINI_API_KEY : '');
-      if (!apiKey) throw new Error(`API Key para ${selectedApi.toUpperCase()} não encontrada na aba API Keys.`);
+    const langNames = { pt: 'Português (Brasil)', en: 'Inglês (EN-US)', es: 'Espanhol (ES-ES)' };
+    
+    const parts: any[] = [
+      { text: `
+        Markdown de entrada:
+        ${markdownText}
 
-      const ai = new GoogleGenAI({ apiKey: selectedApi === 'gemini' ? apiKey : (apiKeys.gemini || process.env.GEMINI_API_KEY || '') });
-      
-      const parts: any[] = [
-        { text: `
-          Markdown de entrada:
-          ${markdownText}
+        Diretrizes de Branding:
+        ${brandConfig.description}
+        Cores: Azul (${brandConfig.primaryBlue}), Dourado (${brandConfig.primaryGold})
 
-          Diretrizes de Branding:
-          ${brandConfig.description}
-          Cores: Azul (${brandConfig.primaryBlue}), Dourado (${brandConfig.primaryGold})
+        IDIOMA DA PÁGINA: ${langNames[lang]}
+        TRADUÇÃO: Traduza todo o conteúdo do Markdown fielmente para o idioma ${langNames[lang]}, mantendo a precisão técnica.
 
-          INSTRUÇÃO CRÍTICA:
-          Gere um ÚNICO arquivo HTML autônomo contendo HTML, CSS (use Tailwind via CDN: https://cdn.tailwindcss.com) e JS (use Lucide Icons via CDN: https://unpkg.com/lucide@latest).
-          NÃO inclua cabeçalhos ou rodapés externos do construtor.
-          Aplique o branding fornecido de forma elegante e profissional.
-          Use animações suaves (pode usar CSS puro ou bibliotecas via CDN se necessário).
-          O arquivo deve ser auto-contido e pronto para ser aberto em qualquer navegador.
-          Retorne APENAS o código HTML completo, sem blocos de código markdown (\`\`\`html).
-        ` }
-      ];
+        INSTRUÇÃO CRÍTICA:
+        Gere um ÚNICO arquivo HTML autônomo contendo HTML, CSS (use Tailwind via CDN: https://cdn.tailwindcss.com) e JS (use Lucide Icons via CDN: https://unpkg.com/lucide@latest).
+        NÃO inclua cabeçalhos ou rodapés externos do construtor.
+        Aplique o branding fornecido de forma elegante e profissional.
+        Use animações suaves (pode usar CSS puro ou bibliotecas via CDN se necessário).
+        O arquivo deve ser auto-contido e pronto para ser aberto em qualquer navegador.
+        Retorne APENAS o código HTML completo, sem blocos de código markdown (\`\`\`html).
+      ` }
+    ];
 
-      if (brandConfig.pdfBase64) {
-        parts.push({
-          inlineData: {
-            mimeType: "application/pdf",
-            data: brandConfig.pdfBase64
-          }
-        });
-        parts[0].text += "\n\nIMPORTANTE: Siga rigorosamente a identidade visual e diretrizes contidas no PDF de branding anexado.";
-      }
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: { parts },
-        config: {
-          systemInstruction: "Você é um desenvolvedor front-end sênior especializado em criar páginas de destino (landing pages) de alta conversão e tecnicamente precisas."
+    if (brandConfig.pdfBase64) {
+      parts.push({
+        inlineData: {
+          mimeType: "application/pdf",
+          data: brandConfig.pdfBase64
         }
       });
+      parts[0].text += "\n\nIMPORTANTE: Siga rigorosamente a identidade visual e diretrizes contidas no PDF de branding anexado.";
+    }
 
-      let html = response.text || '';
-      html = html.replace(/^```html/, '').replace(/```$/, '').trim();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: { parts },
+      config: {
+        systemInstruction: "Você é um desenvolvedor front-end sênior e tradutor técnico especializado em criar páginas de destino (landing pages) de alta conversão."
+      }
+    });
+
+    let html = response.text || '';
+    html = html.replace(/^```html/, '').replace(/```$/, '').trim();
+    
+    if (session) {
+      const { data, error } = await supabase
+        .from('generated_materials')
+        .insert({
+          user_id: session.user.id,
+          name: customFilename,
+          html_content: html
+        })
+        .select()
+        .single();
       
+      if (data && !error) {
+        const newMaterial: GeneratedMaterial = {
+          id: data.id,
+          name: data.name,
+          html: data.html_content,
+          timestamp: new Date(data.created_at).getTime()
+        };
+        setMaterials(prev => [newMaterial, ...prev]);
+      }
+    } else {
       const newMaterial: GeneratedMaterial = {
         id: Math.random().toString(36).substr(2, 9),
-        name: filename,
+        name: customFilename,
         html: html,
         timestamp: Date.now()
       };
+      setMaterials(prev => [newMaterial, ...prev]);
+    }
 
-      setGeneratedHtml(html);
-      setMaterials([newMaterial, ...materials]);
+    return html;
+  };
+
+  const generatePage = async () => {
+    if (!markdownText.trim()) return;
+    setLoading(true);
+    
+    try {
+      if (selectedLang === 'all') {
+        const langs: ('pt' | 'en' | 'es')[] = ['pt', 'en', 'es'];
+        let lastHtml = '';
+        for (const lang of langs) {
+          setLoadingMsg(`Gerando versão ${lang.toUpperCase()}...`);
+          lastHtml = await generateSinglePage(lang, `${filename}-${lang}`);
+        }
+        setGeneratedHtml(lastHtml);
+        setFilename(`${filename}-es`); // Show the last one in preview
+      } else {
+        setLoadingMsg(`Gerando página interativa (${selectedLang.toUpperCase()})...`);
+        const html = await generateSinglePage(selectedLang, filename);
+        setGeneratedHtml(html);
+      }
+
       setView('preview');
     } catch (error: any) {
       alert(`Erro: ${error.message}`);
@@ -413,9 +682,9 @@ O Flex Gold é a tendência atual para clínicas que buscam um implante para tud
 
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-900 font-sans">
-      {/* Header & Nav */}
-      <nav className="bg-white border-b border-slate-200 sticky top-0 z-50 px-6 py-4">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+      {/* Header */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-50 px-6 py-4">
+        <div className="max-w-7xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-lg" style={{ backgroundColor: brandConfig.primaryBlue }}>
               <Sparkles size={24} />
@@ -428,24 +697,55 @@ O Flex Gold é a tendência atual para clínicas que buscam um implante para tud
             </div>
           </div>
 
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl overflow-x-auto max-w-full">
-            {[
-              { id: 'branding', icon: Palette, label: 'Branding' },
-              { id: 'keys', icon: Key, label: 'API Keys' },
-              { id: 'converter', icon: FileText, label: 'Converter' },
-              { id: 'editor', icon: Code, label: 'Editor' },
-              { id: 'preview', icon: Eye, label: 'Preview' },
-              { id: 'materials', icon: History, label: 'Materiais' }
-            ].map((tab) => (
+          <div className="flex items-center gap-4">
+            {session ? (
+              <div className="flex items-center gap-3 bg-slate-50 px-4 py-2 rounded-xl border border-slate-100">
+                <div className="w-8 h-8 bg-slate-200 rounded-full flex items-center justify-center text-slate-500">
+                  <User size={16} />
+                </div>
+                <div className="hidden sm:block">
+                  <p className="text-[10px] font-black text-slate-400 uppercase leading-none mb-1">Usuário</p>
+                  <p className="text-xs font-bold text-slate-700 truncate max-w-[120px]">{session.user.email}</p>
+                </div>
+                <button 
+                  onClick={() => supabase.auth.signOut()}
+                  className="p-2 text-slate-400 hover:text-red-500 transition-colors"
+                  title="Sair"
+                >
+                  <LogOut size={18} />
+                </button>
+              </div>
+            ) : (
               <button 
-                key={tab.id}
-                onClick={() => setView(tab.id as ViewType)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${view === tab.id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                onClick={() => setView('keys')} // Or show a modal
+                className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-slate-800 transition-all"
               >
-                <tab.icon size={14} /> {tab.label}
+                <LogIn size={16} /> Entrar
               </button>
-            ))}
+            )}
           </div>
+        </div>
+      </header>
+
+      {/* Navigation Sub-header */}
+      <nav className="bg-white/80 backdrop-blur-md border-b border-slate-100 sticky top-[73px] z-40 px-6 py-2">
+        <div className="max-w-7xl mx-auto flex items-center justify-center gap-1 overflow-x-auto max-w-full">
+          {[
+            { id: 'branding', icon: Palette, label: 'Branding' },
+            { id: 'keys', icon: Key, label: 'API Keys' },
+            { id: 'converter', icon: FileText, label: 'Converter' },
+            { id: 'editor', icon: Code, label: 'Editor' },
+            { id: 'preview', icon: Eye, label: 'Preview' },
+            { id: 'materials', icon: History, label: 'Materiais' }
+          ].map((tab) => (
+            <button 
+              key={tab.id}
+              onClick={() => setView(tab.id as ViewType)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${view === tab.id ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
+            >
+              <tab.icon size={14} /> {tab.label}
+            </button>
+          ))}
         </div>
       </nav>
 
@@ -529,7 +829,10 @@ O Flex Gold é a tendência atual para clínicas que buscam um implante para tud
                   )}
                 </div>
 
-                <button onClick={() => setView('keys')} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition-all">
+                <button onClick={saveBranding} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition-all mb-4">
+                  <Save size={18} /> Salvar Branding no Supabase
+                </button>
+                <button onClick={() => setView('keys')} className="w-full bg-slate-100 text-slate-600 py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-slate-200 transition-all">
                   Próximo Passo: Chaves de API <ChevronRight size={18} />
                 </button>
               </div>
@@ -562,7 +865,33 @@ O Flex Gold é a tendência atual para clínicas que buscam um implante para tud
                     </div>
                   ))}
                 </div>
-                <button onClick={() => setView('converter')} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition-all">
+                <button onClick={saveApiKeys} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition-all mb-4">
+                  <Save size={18} /> Salvar Chaves no Supabase
+                </button>
+
+                {!session && (
+                  <div className="bg-amber-50 border border-amber-200 p-6 rounded-2xl mb-8">
+                    <h4 className="text-amber-800 font-black text-sm uppercase mb-2 flex items-center gap-2">
+                      <LogIn size={16} /> Acesso Restrito
+                    </h4>
+                    <p className="text-amber-700 text-xs mb-4">Utilize as credenciais mestre para acessar a plataforma.</p>
+                    <form onSubmit={handleAuth} className="space-y-3">
+                      <input 
+                        type="email" placeholder="E-mail" value={authEmail} onChange={e => setAuthEmail(e.target.value)}
+                        className="w-full px-4 py-2 border rounded-xl text-sm outline-none" required
+                      />
+                      <input 
+                        type="password" placeholder="Senha" value={authPassword} onChange={e => setAuthPassword(e.target.value)}
+                        className="w-full px-4 py-2 border rounded-xl text-sm outline-none" required
+                      />
+                      <button type="submit" className="w-full bg-amber-600 text-white py-2 rounded-xl text-xs font-bold hover:bg-amber-700 transition-all">
+                        Entrar
+                      </button>
+                    </form>
+                  </div>
+                )}
+
+                <button onClick={() => setView('converter')} className="w-full bg-slate-100 text-slate-600 py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-slate-200 transition-all">
                   Próximo Passo: Texto para Markdown <ChevronRight size={18} />
                 </button>
               </div>
@@ -598,7 +927,7 @@ O Flex Gold é a tendência atual para clínicas que buscam um implante para tud
                 <h2 className="text-3xl font-black mb-2">Markdown para HTML</h2>
                 <p className="text-slate-500">Refine o Markdown e configure a geração da página.</p>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="space-y-1">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Modelo de IA</label>
                     <select 
@@ -610,6 +939,19 @@ O Flex Gold é a tendência atual para clínicas que buscam um implante para tud
                       <option value="openai">OpenAI (GPT-4o)</option>
                       <option value="claude">Anthropic Claude</option>
                       <option value="groq">Groq (Llama 3)</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Idioma</label>
+                    <select 
+                      value={selectedLang} 
+                      onChange={(e) => setSelectedLang(e.target.value as any)}
+                      className="w-full px-4 py-2 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-slate-200"
+                    >
+                      <option value="pt">Português (PT-BR)</option>
+                      <option value="en">Inglês (EN-US)</option>
+                      <option value="es">Espanhol (ES-ES)</option>
+                      <option value="all">Gerar nos 3 idiomas</option>
                     </select>
                   </div>
                   <div className="space-y-1">
@@ -706,11 +1048,43 @@ O Flex Gold é a tendência atual para clínicas que buscam um implante para tud
                         <div className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${brandConfig.primaryBlue}10`, color: brandConfig.primaryBlue }}>
                           <FileText size={24} />
                         </div>
-                        <div className="overflow-hidden">
-                          <h4 className="font-black text-slate-800 truncate">{material.name}.html</h4>
-                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                            Gerado em {new Date(material.timestamp).toLocaleString()}
-                          </p>
+                        <div className="overflow-hidden flex-1">
+                          {editingId === material.id ? (
+                            <div className="flex items-center gap-2">
+                              <input 
+                                type="text" 
+                                value={editName} 
+                                onChange={(e) => setEditName(e.target.value)}
+                                className="px-3 py-1 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-slate-200 w-full"
+                                autoFocus
+                                onKeyDown={(e) => e.key === 'Enter' && updateMaterialName(material.id)}
+                              />
+                              <button onClick={() => updateMaterialName(material.id)} className="p-2 text-emerald-500 hover:bg-emerald-50 rounded-lg">
+                                <Check size={16} />
+                              </button>
+                              <button onClick={() => setEditingId(null)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-lg">
+                                <X size={16} />
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <h4 className="font-black text-slate-800 truncate flex items-center gap-2">
+                                {material.name}.html
+                                <button 
+                                  onClick={() => {
+                                    setEditingId(material.id);
+                                    setEditName(material.name);
+                                  }}
+                                  className="p-1 text-slate-300 hover:text-slate-600 transition-colors"
+                                >
+                                  <Pencil size={12} />
+                                </button>
+                              </h4>
+                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                                Gerado em {new Date(material.timestamp).toLocaleString()}
+                              </p>
+                            </>
+                          )}
                         </div>
                       </div>
                       
@@ -750,6 +1124,49 @@ O Flex Gold é a tendência atual para clínicas que buscam um implante para tud
                 </div>
               )}
             </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Delete Confirmation Modal */}
+        <AnimatePresence>
+          {deleteConfirmId && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setDeleteConfirmId(null)}
+                className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+              />
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                className="relative bg-white rounded-[2.5rem] p-8 max-w-md w-full shadow-2xl border border-slate-100"
+              >
+                <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mb-6">
+                  <AlertTriangle size={32} />
+                </div>
+                <h3 className="text-2xl font-black text-slate-900 mb-2">Excluir Material?</h3>
+                <p className="text-slate-500 mb-8">
+                  Esta ação não pode ser desfeita. O arquivo será removido permanentemente do seu histórico e do banco de dados.
+                </p>
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => setDeleteConfirmId(null)}
+                    className="flex-1 px-6 py-4 rounded-2xl font-bold text-slate-500 hover:bg-slate-50 transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    onClick={confirmDelete}
+                    className="flex-1 px-6 py-4 rounded-2xl font-bold bg-red-500 text-white hover:bg-red-600 shadow-lg shadow-red-200 transition-all"
+                  >
+                    Confirmar Exclusão
+                  </button>
+                </div>
+              </motion.div>
+            </div>
           )}
         </AnimatePresence>
       </main>
